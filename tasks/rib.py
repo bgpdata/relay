@@ -1,18 +1,3 @@
-"""
-BGPDATA - BGP Data Collection and Analytics Service
-
-This software is part of the BGPDATA project, which is designed to collect, process, and analyze BGP data from various sources.
-It helps researchers and network operators get insights into their network by providing a scalable and reliable way to analyze and inspect historical and live BGP data from Route Collectors around the world.
-
-Author: Robin Röper
-Co-Author: Tim Evens
-
-Eclipse Public License - v 1.0
-
-THE ACCOMPANYING PROGRAM IS PROVIDED UNDER THE TERMS OF THIS ECLIPSE PUBLIC
-LICENSE ("AGREEMENT"). ANY USE, REPRODUCTION OR DISTRIBUTION OF THE PROGRAM
-CONSTITUTES RECIPIENT'S ACCEPTANCE OF THIS AGREEMENT.
-"""
 from scapy.contrib.bgp import BGPHeader, BGPOpen, BGPUpdate, BGPOptParam, BGPCapMultiprotocol, BGPCapGeneric, BGPCapFourBytesASN
 from bs4 import BeautifulSoup
 from datetime import datetime
