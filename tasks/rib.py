@@ -213,7 +213,7 @@ def rib_task(queue, db, logger, events, memory):
             memory['rows_processed'] += 1
             # Process only TABLE_DUMP_V2 RIB_IPV4_UNICAST entries.
             # NOTE: Assumes MRT type 13 with subtype 2; adjust if needed.
-            if entry['mrt_header']['type'] == 13 and entry['mrt_header']['subtype'] == 2:
+            if entry['mrt_header']['type'] == 13 and entry['mrt_header']['subtype'] in {2, 4}:
                 # Obtain the raw prefix NLRI
                 raw_prefix_nlri = entry['mrt_entry']['raw_prefix_nlri']
                 # Loop through each RIB entry within the MRT record
