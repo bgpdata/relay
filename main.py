@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 log_level = Config.LOG_LEVEL
 logger.setLevel(getattr(logging, log_level, logging.INFO))
 
+# Add console handler if none exists
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(getattr(logging, log_level, logging.INFO))
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
 # Signal handler
 def handle_shutdown(signum, frame, event):
     """

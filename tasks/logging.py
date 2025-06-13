@@ -26,6 +26,7 @@ def logging_task(queue, logger, events, memory):
                 logger.info(f"host={Config.HOST} task={memory['task']} lag={int(h)}h {int(m)}m {int(s)}s receive={kbps_received:.2f} kbps send={kbps_sent:.2f} kbps queued={queue.qsize()}")
             else:
                 logger.info(f"host={Config.HOST} task={memory['task']} receive={kbps_received:.2f} kbps send={kbps_sent:.2f} kbps queued={queue.qsize()}")
+            
             # Reset trackers
             memory['bytes_sent'] = 0
             memory['bytes_received'] = 0
