@@ -33,16 +33,29 @@ def rib_task(queue, db, logger, events, memory):
                 """
                 self.peer = peer
                 self.raw_path_attribute = raw_path_attribute
-                self.mp_reach = mp_reach  # Can be None if not used.
+                self.mp_reach = mp_reach # Can be None if not used.
                 self.prefixes = [initial_prefix]
                 self.collector = collector
                 self.timestamp = timestamp
 
-            def add_prefix(self, prefix):
+                if mp_reach is not None:
+                    self.afi = int.from_bytes(mp_reach[0:2], byteorder='big')
+                    self.safi = mp_reach[2]
+                else:
+                    self.afi = 1 # Legacy IPv4 unicast
+                    self.safi = 1 # Unicast
+
+            def add_prefix(self, prefix, mp_reach):
                 """
                 Append another NLRI prefix to the bucket.
                 Optionally, you can flush the bucket if it becomes too large.
                 """
+                # Verify AFI homogeneity
+                if mp_reach is not None:
+                    inserting_afi = int.from_bytes(mp_reach[0:2], byteorder='big')
+                    if inserting_afi != self.afi:
+                        raise ValueError(f"Tried to insert AFI {inserting_afi} prefix into AFI {self.afi} bucket")
+                    
                 # (Optional) Flush if accumulated prefixes are too large.
                 if sum(len(p) for p in self.prefixes) >= 4000:
                     # In a real implementation you might want to return or enqueue the message here.
@@ -212,8 +225,8 @@ def rib_task(queue, db, logger, events, memory):
         for entry in iterator:
             memory['rows_processed'] += 1
             # Process only TABLE_DUMP_V2 RIB_IPV4_UNICAST entries.
-            # NOTE: Assumes MRT type 13 with subtype 2 or 4; adjust if needed.
-            if entry['mrt_header']['type'] == 13 and entry['mrt_header']['subtype'] in {2, 4}:
+            # NOTE: Assumes MRT type 13 with subtype 2 (IPv4) or 4 (IPv6); adjust if needed.
+            if entry['mrt_header']['type'] == 13 and entry['mrt_header']['subtype'] in [2, 4]:
                 # Obtain the raw prefix NLRI
                 raw_prefix_nlri = entry['mrt_entry']['raw_prefix_nlri']
                 # Loop through each RIB entry within the MRT record
@@ -222,34 +235,38 @@ def rib_task(queue, db, logger, events, memory):
                     if db.get(f'timestamp_{peers[rib_entry["peer_index"]]["asn"]}'.encode('utf-8')) is not None:
                         continue
 
-                    # Add the peer index to the set of updating peer indexes
-                    peer_indexes.add(rib_entry['peer_index'])
-
-                    # Compute a bucket key based on the peer index and the hash of the path attributes
+                    # Extract attributes from the RIB entry
                     raw_path_attributes = b"".join(rib_entry['raw_bgp_attributes'])
-                    bucket_key = f"{rib_entry['peer_index']}_{hash(raw_path_attributes)}"
+                    mp_reach = rib_entry.get('raw_mp_reach_nlri', {}).get('value')
+                    peer_index = rib_entry['peer_index']
+
+                    # Add the peer index to the set of updating peer indexes
+                    peer_indexes.add(peer_index)
+
+                    # Compute a bucket key based on the peer index, AFI, and the hash of the path attributes
+                    bucket_key = f"{peer_index}_{int.from_bytes(mp_reach[0:2], byteorder='big') if mp_reach else 1}_{hash(raw_path_attributes)}"
 
                     # Update the maximum timestamp if we find a newer one for the peer
-                    if peers[rib_entry['peer_index']]['asn'] not in max_timestamps or float(entry['mrt_header']['timestamp']) > max_timestamps[peers[rib_entry['peer_index']]['asn']]:
-                        max_timestamps[peers[rib_entry['peer_index']]['asn']] = float(entry['mrt_header']['timestamp'])
+                    if peers[peer_index]['asn'] not in max_timestamps or (float(entry['mrt_header']['timestamp']) > max_timestamps[peers[peer_index]['asn']] and rib_entry['raw_mp_reach_nlri'] is not None):
+                        max_timestamps[peers[peer_index]['asn']] = float(entry['mrt_header']['timestamp'])
 
                     # Update the minimum timestamp if we find an older one for the peer
-                    if peers[rib_entry['peer_index']]['asn'] not in min_timestamps or float(entry['mrt_header']['timestamp']) < min_timestamps[peers[rib_entry['peer_index']]['asn']]:
-                        min_timestamps[peers[rib_entry['peer_index']]['asn']] = float(entry['mrt_header']['timestamp'])
+                    if peers[peer_index]['asn'] not in min_timestamps or float(entry['mrt_header']['timestamp']) < min_timestamps[peers[peer_index]['asn']]:
+                        min_timestamps[peers[peer_index]['asn']] = float(entry['mrt_header']['timestamp'])
 
                     if bucket_key in buckets:
-                        buckets[bucket_key].add_prefix(raw_prefix_nlri)
+                        buckets[bucket_key].add_prefix(raw_prefix_nlri, mp_reach)
                     else:
                         # Retrieve peer information
-                        peer = peers[rib_entry['peer_index']]
-                        # Get the MP_REACH attribute if it exists
-                        mp_reach = rib_entry.get('raw_mp_reach_nlri', {}).get('value')
-                        buckets[bucket_key] = MessageBucket(peer,
-                                                            raw_path_attributes,
-                                                            raw_prefix_nlri,
-                                                            mp_reach,
-                                                            f'{Config.HOST}.ripe.net' if Config.HOST.startswith('rrc') else Config.HOST,
-                                                            entry['mrt_header']['timestamp'])
+                        peer = peers[peer_index]                        
+                        buckets[bucket_key] = MessageBucket(
+                            peer,
+                            raw_path_attributes,
+                            raw_prefix_nlri,
+                            mp_reach,
+                            f'{Config.HOST}.ripe.net' if Config.HOST.startswith('rrc') else Config.HOST,
+                            entry['mrt_header']['timestamp']
+                        )
 
         # Check for updates
         if len(buckets) > 0:
